@@ -71,11 +71,20 @@ client.on("interactionCreate", async (interaction) => {
 
   const { commandName, options } = interaction;
 
-  if (commandName === "lyrics") {
+  if (commandName === "fetchlyrics") {
     const songTitle = options.getString("song");
     const lyrics = await fetchLyrics(songTitle);
-    await interaction.reply(`Lyrics for "${songTitle}":\n${lyrics}`);
+
+    try {
+      await interaction.reply(`Lyrics for "${songTitle}":\n${lyrics}`);
+    } catch (error) {
+      console.error("Failed to send reply:", error);
+    }
   }
+});
+
+client.on("error", (error) => {
+  console.error("Discord client encountered an error:", error);
 });
 
 client.once("ready", () => {
