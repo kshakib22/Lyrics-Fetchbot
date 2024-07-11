@@ -72,13 +72,22 @@ client.on("interactionCreate", async (interaction) => {
   const { commandName, options } = interaction;
 
   if (commandName === "fetchlyrics") {
-    const songTitle = options.getString("song");
-    const lyrics = await fetchLyrics(songTitle);
+    await interaction.deferReply(); // Defer the reply
 
     try {
-      await interaction.reply(`Lyrics for "${songTitle}":\n${lyrics}`);
+      const songTitle = options.getString("song");
+      const lyrics = await fetchLyrics(songTitle);
+
+      if (interaction.isRepliable()) {
+        await interaction.editReply(`Lyrics for "${songTitle}":\n${lyrics}`);
+      } else {
+        console.log("Interaction is no longer valid");
+      }
     } catch (error) {
-      console.error("Failed to send reply:", error);
+      console.error("Error handling interaction:", error);
+      if (interaction.isRepliable()) {
+        await interaction.editReply("An error occurred while fetching lyrics.");
+      }
     }
   }
 });
