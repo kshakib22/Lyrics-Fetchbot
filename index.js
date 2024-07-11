@@ -1,5 +1,11 @@
 require("dotenv").config();
-const { Client, GatewayIntentBits, REST, Routes } = require("discord.js");
+const {
+  Client,
+  GatewayIntentBits,
+  REST,
+  Routes,
+  SlashCommandBuilder,
+} = require("discord.js");
 const Genius = require("genius-lyrics");
 
 const client = new Client({
@@ -11,25 +17,25 @@ const client = new Client({
 });
 
 const GeniusClient = new Genius.Client(process.env.GENIUS_ACCESS_TOKEN);
+
+// Define the slash command
 const commands = [
-  {
-    name: "lyrics",
-    description: "Fetch lyrics for a song",
-    options: [
-      {
-        name: "song",
-        type: "STRING",
-        description: "The name of the song",
-        required: true,
-      },
-    ],
-  },
-];
+  new SlashCommandBuilder()
+    .setName("fetchlyrics") // Updated command name to /fetchlyrics
+    .setDescription("Fetch lyrics for a song")
+    .addStringOption((option) =>
+      option
+        .setName("song")
+        .setDescription("The name of the song")
+        .setRequired(true)
+    ),
+].map((command) => command.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(
   process.env.DISCORD_BOT_TOKEN
 );
 
+// Register the slash command
 (async () => {
   try {
     console.log("Started refreshing application (/) commands.");
