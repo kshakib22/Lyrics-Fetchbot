@@ -5,6 +5,8 @@ const {
   REST,
   Routes,
   SlashCommandBuilder,
+  StringSelectMenuBuilder,
+  ActionRowBuilder,
 } = require("discord.js");
 const Genius = require("genius-lyrics");
 
@@ -21,13 +23,19 @@ const GeniusClient = new Genius.Client(process.env.GENIUS_ACCESS_TOKEN);
 // Define the slash command
 const commands = [
   new SlashCommandBuilder()
-    .setName("fetchlyrics") // Updated command name to /fetchlyrics
+    .setName("fetchlyrics")
     .setDescription("Fetch lyrics for a song")
     .addStringOption((option) =>
       option
         .setName("song")
         .setDescription("The name of the song")
         .setRequired(true)
+    )
+    .addStringOption((option) =>
+      option
+        .setName("artist")
+        .setDescription("The name of the artist (optional)")
+        .setRequired(false)
     ),
 ].map((command) => command.toJSON());
 
@@ -50,19 +58,19 @@ const rest = new REST({ version: "10" }).setToken(
   }
 })();
 
-async function fetchLyrics(songTitle) {
+async function fetchLyrics(songTitle, artistName = "") {
   try {
-    const searches = await GeniusClient.songs.search(songTitle);
+    const searchQuery = artistName ? `${songTitle} ${artistName}` : songTitle;
+    const searches = await GeniusClient.songs.search(searchQuery);
+
     if (searches.length === 0) {
-      return "No lyrics found for this song.";
+      return { success: false, message: "No lyrics found for this song." };
     }
 
-    const song = searches[0];
-    const lyrics = await song.lyrics();
-    return lyrics;
+    return { success: true, results: searches.slice(0, 5) }; // Return top 5 results
   } catch (error) {
     console.error("Error fetching lyrics:", error);
-    return "Error fetching lyrics.";
+    return { success: false, message: "Error fetching lyrics." };
   }
 }
 
@@ -72,17 +80,97 @@ client.on("interactionCreate", async (interaction) => {
   const { commandName, options } = interaction;
 
   if (commandName === "fetchlyrics") {
-    await interaction.deferReply(); // Defer the reply
+    await interaction.deferReply();
 
     try {
       const songTitle = options.getString("song");
-      const lyrics = await fetchLyrics(songTitle);
+      const artistName = options.getString("artist");
+      const result = await fetchLyrics(songTitle, artistName);
 
-      if (interaction.isRepliable()) {
-        await interaction.editReply(`Lyrics for "${songTitle}":\n${lyrics}`);
-      } else {
-        console.log("Interaction is no longer valid");
+      if (!result.success) {
+        await interaction.editReply(result.message);
+        return;
       }
+
+      const songs = result.results;
+
+      // Create selection menu
+      const selectMenu = new StringSelectMenuBuilder()
+        .setCustomId("lyric_select")
+        .setPlaceholder("Select a song")
+        .addOptions(
+          songs.map((song, index) => ({
+            label: `${song.title} by ${song.artist.name}`.substring(0, 100),
+            description: `${song.fullTitle}`.substring(0, 100),
+            value: `${index}`,
+          }))
+        );
+
+      // Add a cancel option
+      selectMenu.addOptions([
+        {
+          label: "Cancel",
+          description: "Cancel the lyric search",
+          value: "cancel",
+        },
+      ]);
+
+      const row = new ActionRowBuilder().addComponents(selectMenu);
+
+      const reply = await interaction.editReply({
+        content: "Please select a song:",
+        components: [row],
+      });
+
+      // Handle selection
+      const filter = (i) =>
+        i.customId === "lyric_select" && i.user.id === interaction.user.id;
+      const collector = reply.createMessageComponentCollector({ filter });
+
+      collector.on("collect", async (i) => {
+        await i.deferUpdate();
+
+        if (i.values[0] === "cancel") {
+          await interaction.followUp("Lyric search cancelled.");
+          collector.stop("cancelled");
+          return;
+        }
+
+        const selectedIndex = parseInt(i.values[0]);
+        const selectedSong = songs[selectedIndex];
+        const lyrics = await selectedSong.lyrics();
+
+        await interaction.followUp(
+          `Fetching lyrics for "${selectedSong.title}"...`
+        );
+
+        // Prepare the lyrics message
+        let lyricsMessage = `Lyrics for "${selectedSong.title}" by ${selectedSong.artist.name}:\n\n${lyrics}`;
+
+        // Split lyrics into chunks of 1950 characters
+        const chunkSize = 1950;
+        const chunks = [];
+
+        for (let i = 0; i < lyricsMessage.length; i += chunkSize) {
+          chunks.push(lyricsMessage.slice(i, i + chunkSize));
+        }
+
+        // Send chunks as separate messages
+        for (let i = 0; i < chunks.length; i++) {
+          await interaction.followUp(chunks[i]);
+        }
+
+        collector.stop();
+      });
+
+      collector.on("end", (collected, reason) => {
+        if (reason === "cancelled") return;
+        if (collected.size === 0) {
+          interaction.followUp(
+            "No song was selected. The lyric search has been cancelled."
+          );
+        }
+      });
     } catch (error) {
       console.error("Error handling interaction:", error);
       if (interaction.isRepliable()) {
